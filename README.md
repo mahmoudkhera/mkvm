@@ -1,2 +1,2 @@
 # mkvm
-a 16-bit virtual machine in rust
+a 32-bit ARM virtual machine in rust
