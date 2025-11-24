@@ -13,31 +13,16 @@ pub enum InstructionClasses {
 
 impl InstructionClasses {
     /// Encode the instruction class into the instruction
-    pub fn encode(self, mut inst: Instruction) -> Instruction {
-        match self {
-            InstructionClasses::DataProcessing => {
-                inst = set_bits!(inst, 0, 27, 26);
-            }
-            InstructionClasses::LoadStore => {
-                inst = set_bits!(inst, 0, 27, 25);
-                inst = set_bits!(inst, 1, 26);
-            }
-            InstructionClasses::LoadStoreM => {
-                inst = set_bits!(inst, 1, 26, 25);
-                inst = set_bits!(inst, 0, 27, 4);
-            }
-            InstructionClasses::Media => {
-                inst = set_bits!(inst, 1, 26, 25, 4);
-                inst = set_bits!(inst, 0, 27);
-            }
-            InstructionClasses::Branch => {
-                inst = set_bits!(inst, 1, 27);
-                inst = set_bits!(inst, 0, 26);
-            }
-            InstructionClasses::SupervisorCall => {
-                inst = set_bits!(inst, 1, 27, 26);
-            }
-        }
+    pub fn encode(self, inst: Instruction) -> Instruction {
+       let inst=match self {
+            InstructionClasses::DataProcessing => set_bits!(inst, 0b00, 27, 26),
+
+            InstructionClasses::LoadStore => set_bits!(inst, 0b010, 27, 26, 25),
+            InstructionClasses::LoadStoreM => set_bits!(inst, 0b0110, 27, 26, 25, 4),
+            InstructionClasses::Media => set_bits!(inst, 0b0111, 27, 26, 26, 4),
+            InstructionClasses::Branch => set_bits!(inst, 0b10, 27, 26),
+            InstructionClasses::SupervisorCall => set_bits!(inst, 0b11, 27, 26),
+        };
         inst
     }
 
@@ -76,61 +61,24 @@ pub enum DataProcessing {
 }
 
 impl DataProcessing {
-    pub fn encode(self, inst: Instruction) -> u32 {
-        match self {
-            DataProcessing::DataProcessingRegister => {
-                set_bits!(inst, 0, 25, 4)
-            }
-            DataProcessing::DataProcessingRegisterShifted => {
-                let inst = set_bits!(inst, 0, 25, 27);
-                set_bits!(inst, 1, 3)
-            }
-            DataProcessing::MiscInstructions => {
-                // 10xx0 0xxx
-                let inst = set_bits!(inst, 0, 25, 23, 20, 7);
-                set_bits!(inst, 1, 24)
-            }
-            DataProcessing::HalfwordMultiply => {
-                // 1xx0
-                let inst = set_bits!(inst, 0, 25, 23, 20, 4);
-                set_bits!(inst, 1, 7)
-            }
-            DataProcessing::MultiplyAccumulate => {
-                let inst = set_bits!(inst, 0, 25, 24, 6, 5);
-                set_bits!(inst, 1, 7, 4)
-            }
-            DataProcessing::SyncPrimitives => {
-                let inst = set_bits!(inst, 0, 25, 5, 6);
-                set_bits!(inst, 1, 24, 7, 4)
-            }
-            DataProcessing::ExtraLoadStore => {
-                // not 0xx1x 1011
-                let inst = set_bits!(inst, 0, 25, 6);
-                set_bits!(inst, 1, 7, 5, 4)
-            }
+    pub fn encode(self, inst: Instruction) -> Instruction {
+        let inst= match self {
+            DataProcessing::DataProcessingRegister => set_bits!(inst, 0b00, 25, 4),
+            DataProcessing::DataProcessingRegisterShifted => set_bits!(inst, 0b01, 25, 4),
+            DataProcessing::MiscInstructions => set_bits!(inst, 0b01000, 25, 24, 23, 20, 7),
+            DataProcessing::HalfwordMultiply => set_bits!(inst, 0b010010, 25, 24, 23, 7, 4),
+            DataProcessing::MultiplyAccumulate => set_bits!(inst, 0b001001, 25, 24, 7, 6, 5, 4),
+            DataProcessing::SyncPrimitives => set_bits!(inst, 0b0101001, 25, 24, 7, 6, 5, 4),
+            DataProcessing::ExtraLoadStore => set_bits!(inst, 0b01011, 25, 7, 6, 5, 4),
             DataProcessing::ExtraLoadStoreUnpriv => {
-                let inst: u32 = set_bits!(inst, 0, 25, 24, 6);
-                set_bits!(inst, 1, 21, 7, 5, 4)
+                set_bits!(inst, 0b0011011, 25, 24, 21, 7, 6, 5, 4)
             }
-            DataProcessing::DataProcessingImmediate => {
-                set_bits!(inst, 1, 25)
-            }
-            DataProcessing::MovImmediate16 => {
-                let inst: u32 = set_bits!(inst, 0, 23, 22, 21, 20);
-
-                set_bits!(inst, 1, 25, 24)
-            }
-            DataProcessing::MovTImmediate16 => {
-                let inst: u32 = set_bits!(inst, 0, 23, 21, 20);
-
-                set_bits!(inst, 1, 25, 24, 22)
-            }
-            DataProcessing::MSRImmediateHints => {
-                let inst: u32 = set_bits!(inst, 0, 23, 20);
-
-                set_bits!(inst, 1, 25, 21)
-            }
-        }
+            DataProcessing::DataProcessingImmediate => set_bits!(inst, 0b1, 25),
+            DataProcessing::MovImmediate16 => set_bits!(inst, 0b110000, 25, 24, 23, 22, 21, 20),
+            DataProcessing::MovTImmediate16 => set_bits!(inst, 0b110100, 25, 24, 23, 22, 21, 20),
+            DataProcessing::MSRImmediateHints => set_bits!(inst, 0b11010, 25, 24, 23, 21, 20),
+        };
+        inst
     }
 
     pub fn decode(inst: Instruction) -> Option<Self> {
@@ -215,6 +163,30 @@ impl DataProcessing {
         None
     }
 }
+
+#[derive(Debug, Clone)]
+
+/// Data-processing (register)
+pub enum InstructionDPReg {
+    And, // bitwise AND
+    Eor, // bitwise XOR
+    Sub, // subtract
+    Rsb, // reverse subtract (op2 - op1)
+    Add, // add
+    Adc, // add with carry
+    Sbc, // subtract with carry
+    Rsc, // reverse subtract with carry
+    Tst, // AND and set flags only
+    Teq, // XOR and set flags only
+    Cmp, // subtract and set flags only
+    Cmn, // add and set flags only
+    Orr, // bitwise OR
+    Mov, // move value to register
+    Bic, // bit clear (AND with NOT)
+    Mvn, // bitwise NOT (move NOT)
+}
+
+impl InstructionDPReg {}
 
 pub enum InstructionSet {
     //  DATA PROCESSING INSTRUCTIONS (Register/Immediate)
