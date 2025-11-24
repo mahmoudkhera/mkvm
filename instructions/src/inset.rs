@@ -1,20 +1,6 @@
-type Instruction = u32;
+use crate::set_bits;
 
-macro_rules! set_bits {
-    ($value:expr, $set_to:expr, $($pos:expr),*) => {{
-        let mut val = $value;
-        $(
-            if $pos < 32 {
-                if $set_to==1 {
-                    val |= 1 << $pos;
-                } else  {
-                    val &= !(1 << $pos);
-                }
-            }
-        )*
-        val
-    }};
-}
+type Instruction = u32;
 
 pub enum InstructionClasses {
     DataProcessing,
@@ -74,6 +60,162 @@ impl InstructionClasses {
 }
 
 #[derive(Debug, Clone)]
+pub enum DataProcessing {
+    DataProcessingRegister,        // 0 not 10xx0 xxx0
+    DataProcessingRegisterShifted, // 0xx1
+    MiscInstructions,              // 10xx0 0xxx
+    HalfwordMultiply,              // 1xx0
+    MultiplyAccumulate,            // 0xxxx 1001
+    SyncPrimitives,                // 1xxxx 1001
+    ExtraLoadStore,                // not 0xx1x 1011
+    ExtraLoadStoreUnpriv,          // 0xx1x 1011
+    DataProcessingImmediate,       // 1 not 10xx0
+    MovImmediate16,                // 10000-
+    MovTImmediate16,               // 10100-
+    MSRImmediateHints,             // 10x10-
+}
+
+impl DataProcessing {
+    pub fn encode(self, inst: Instruction) -> u32 {
+        match self {
+            DataProcessing::DataProcessingRegister => {
+                set_bits!(inst, 0, 25, 4)
+            }
+            DataProcessing::DataProcessingRegisterShifted => {
+                let inst = set_bits!(inst, 0, 25, 27);
+                set_bits!(inst, 1, 3)
+            }
+            DataProcessing::MiscInstructions => {
+                // 10xx0 0xxx
+                let inst = set_bits!(inst, 0, 25, 23, 20, 7);
+                set_bits!(inst, 1, 24)
+            }
+            DataProcessing::HalfwordMultiply => {
+                // 1xx0
+                let inst = set_bits!(inst, 0, 25, 23, 20, 4);
+                set_bits!(inst, 1, 7)
+            }
+            DataProcessing::MultiplyAccumulate => {
+                let inst = set_bits!(inst, 0, 25, 24, 6, 5);
+                set_bits!(inst, 1, 7, 4)
+            }
+            DataProcessing::SyncPrimitives => {
+                let inst = set_bits!(inst, 0, 25, 5, 6);
+                set_bits!(inst, 1, 24, 7, 4)
+            }
+            DataProcessing::ExtraLoadStore => {
+                // not 0xx1x 1011
+                let inst = set_bits!(inst, 0, 25, 6);
+                set_bits!(inst, 1, 7, 5, 4)
+            }
+            DataProcessing::ExtraLoadStoreUnpriv => {
+                let inst: u32 = set_bits!(inst, 0, 25, 24, 6);
+                set_bits!(inst, 1, 21, 7, 5, 4)
+            }
+            DataProcessing::DataProcessingImmediate => {
+                set_bits!(inst, 1, 25)
+            }
+            DataProcessing::MovImmediate16 => {
+                let inst: u32 = set_bits!(inst, 0, 23, 22, 21, 20);
+
+                set_bits!(inst, 1, 25, 24)
+            }
+            DataProcessing::MovTImmediate16 => {
+                let inst: u32 = set_bits!(inst, 0, 23, 21, 20);
+
+                set_bits!(inst, 1, 25, 24, 22)
+            }
+            DataProcessing::MSRImmediateHints => {
+                let inst: u32 = set_bits!(inst, 0, 23, 20);
+
+                set_bits!(inst, 1, 25, 21)
+            }
+        }
+    }
+
+    pub fn decode(inst: Instruction) -> Option<Self> {
+        let op = ((inst >> 25) & 0b1) as u8; // bit 25
+        let op1 = ((inst >> 20) & 0b11111) as u8; // bits 24..20
+        let op2 = ((inst >> 4) & 0b1111) as u8; // bits 7..4
+
+        // ----- Patterns -----
+
+        // 0 not 10xx0 xxx0  -> DataProcessingRegister
+        if (op & 0b1) == 0 && (op1 & 0b11001) != 0b10000 && (op2 & 0b1) == 0 {
+            return Some(Self::DataProcessingRegister);
+        }
+
+        //  0 not 10xx0 0xx1 -> DataProcessingRegisterShifted
+        if (op & 0b1) == 0 && (op1 & 0b11001) != 0b10000 && (op1 & 0b1001) == 0b0001 {
+            return Some(Self::DataProcessingRegisterShifted);
+        }
+
+        //  0  10xx0 0xxx -> MiscInstructions
+        if op == 0b1 && (op1 & 0b11001) == 0b10000 && (op2 & 0b1000) == 0 {
+            return Some(Self::MiscInstructions);
+        }
+
+        // 0  10xx0 1xx0 -> HalfwordMultiply
+        if (op & 0b1) != 0 && (op1 & 0b11001) == 0b10000 && (op1 & 0b1001) == 0b1000 {
+            return Some(Self::HalfwordMultiply);
+        }
+
+        //0  0xxxx 1001 -> MultiplyAccumulate
+        if op & 0b1 == 0 && (op1 & 0b10000) == 0 && (op2 == 0b1001) {
+            return Some(Self::MultiplyAccumulate);
+        }
+
+        //0 1xxxx 1001 -> SyncPrimitives
+        if op & 0b1 != 0 && (op1 & 0b10000) == 0b10000 && (op2 == 0b1001) {
+            return Some(Self::SyncPrimitives);
+        }
+
+        // Extra load/store
+        //0  not 0xx1x (1011 or 11x1)
+        if op & 0b1 == 0
+            && (op1 & 0b10010) != 0b00010
+            && ((op2 == 0b1011) | (op2 & 0b1101 == 0b1101))
+        {
+            return Some(Self::ExtraLoadStore);
+        }
+
+        // unprivileged
+        //0 0xx1x (1011 or 11x1)
+        if op & 0b1 == 0
+            && (op1 & 0b10010) == 0b00010
+            && ((op2 == 0b1011) | (op2 & 0b1101 == 0b1101))
+        {
+            return Some(Self::ExtraLoadStoreUnpriv);
+        }
+
+        // Data-processing (immediate)
+        // 1 not 10xx0
+        if (op & 0b1) != 0 && !(op1 & 0b11001) == 0b10000 {
+            return Some(Self::DataProcessingImmediate);
+        }
+
+        // MOV (immediate)
+        // 1  10000
+        if op == 0b100 && (op1 & 0b11111) == 0b10000 {
+            return Some(Self::MovImmediate16);
+        }
+
+        // MOVT
+        // 1 10100-
+        if op == 0b101 && (op1 & 0b111111) == 0b10100 {
+            return Some(Self::MovTImmediate16);
+        }
+
+        // MSR immediate
+        // 1 10x10
+        if op == 0b100 && (op1 & 0b11011) == 0b10010 {
+            return Some(Self::MSRImmediateHints);
+        }
+
+        None
+    }
+}
+
 pub enum InstructionSet {
     //  DATA PROCESSING INSTRUCTIONS (Register/Immediate)
     //  These operate on registers and update a destination register.

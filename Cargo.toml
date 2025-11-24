@@ -1,7 +1,8 @@
-[package]
-name = "mkvm"
-version = "0.1.2"
-edition = "2024"
-authors = ["Mahmoud Khaled Khera"]
+[workspace] 
+members = [
+        "instructions",
+] 
 
-[dependencies]
+resolver = "3"
+
+
